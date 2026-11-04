@@ -23,6 +23,8 @@ h1{font-size:20px;margin:4px 0 12px}h2{font-size:15px;margin:20px 0 8px;color:va
 .leeg,.fout{padding:12px 0;color:var(--mu)}.fout{color:var(--bad)}
 details{margin-top:20px}summary{color:var(--ac);cursor:pointer}
 label{display:block;margin:10px 0 2px;font-size:13px;color:var(--mu)}
+input[type=checkbox]{width:auto;margin:0}
+.menu label.chk{display:flex;gap:8px;align-items:center;color:var(--tx);font-size:15px}
 input{width:100%;padding:10px;border:1px solid var(--ln);border-radius:8px;background:var(--card);color:var(--tx);font:inherit}
 button{margin-top:12px;padding:10px 16px;border:0;border-radius:8px;background:var(--ac);color:#fff;font:inherit;cursor:pointer}
 </style>
@@ -36,6 +38,7 @@ button{margin-top:12px;padding:10px 16px;border:0;border-radius:8px;background:v
   <label for="best">Naar (eindstation, meerdere mogelijk met komma)</label>
   <input id="best" list="dl2" autocomplete="off" placeholder="bijv. Rotterdam Centraal">
   <button id="swap" title="Omdraaien" aria-label="Van en naar omdraaien">⇅</button>
+  <label class="chk"><input type="checkbox" id="overstap"> Ook treinen met overstap tonen</label>
   <button id="zoek">Toon treinen</button>
 </div>
 <datalist id="dl1"></datalist><datalist id="dl2"></datalist>
@@ -43,23 +46,30 @@ button{margin-top:12px;padding:10px 16px;border:0;border-radius:8px;background:v
 <h2 id="mh">Metro</h2><div class="card" id="metros"></div>
 <p class="m" id="upd"></p>
 <details id="inst"><summary>Instellingen</summary>
-<label>Worker-URL</label><input id="base" placeholder="https://treinapp.szy4vk6myh.workers.dev/">
+<label>Worker-URL</label><input id="base" placeholder="https://jouw-worker.jouwnaam.workers.dev">
 <label>Metronaam</label><input id="mnaam">
 <label>Metro-codes (TPC, komma-gescheiden, via ovzoeker.nl)</label><input id="mcodes" placeholder="31001234,31001235">
 <button id="opsl">Opslaan</button></details>
 </main>
 <script>
-const D={base:"",station:"",best:"Rotterdam,Schiedam",mnaam:"Delfshaven",mcodes:""};
+const D={overstap:false,base:"",station:"",best:"Rotterdam,Schiedam",mnaam:"Delfshaven",mcodes:""};
 let S={...D};
 try{S={...D,...JSON.parse(localStorage.getItem("treinapp")||"{}")}}catch(e){}
 const $=id=>document.getElementById(id);
 const ids=["base","station","best","mnaam","mcodes"];
-ids.forEach(i=>$(i).value=S[i]);
+ids.forEach(i=>$(i).value=S[i]);$("overstap").checked=!!S.overstap;
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-function opslaan(){ids.forEach(i=>S[i]=$(i).value.trim());try{localStorage.setItem("treinapp",JSON.stringify(S))}catch(e){}}
+function opslaan(){ids.forEach(i=>S[i]=$(i).value.trim());S.overstap=$("overstap").checked;try{localStorage.setItem("treinapp",JSON.stringify(S))}catch(e){}}
 function rij(t,detail,sub){
   const v=t.vertraging>0?`<span class="v">+${t.vertraging}</span>`:"";
   return `<div class="rij"><span class="t ${t.vervalt?"x":""}">${t.tijd}</span>${v}<span class="r">${detail}<div class="m">${sub}${t.vervalt?" · vervalt":""}</div></span></div>`;
+}
+function reisRij(t){
+  const v=t.vertraging>0?`<span class="v">+${t.vertraging}</span>`:"";
+  const o=t.overstappen===0?"direct":t.overstappen===1?"1 overstap":t.overstappen+" overstappen";
+  const route=t.delen.map(l=>`${esc(l.soort)} ${esc(l.van)} → ${esc(l.naar)}`).join(" › ");
+  const naar=S.best.includes(",")?" · "+esc(t.naar):"";
+  return `<div class="rij"><span class="t ${t.vervalt?"x":""}">${t.vertrek}</span>${v}<span class="r">aankomst ${t.aankomst} · ${o}${naar}<div class="m">spoor ${esc(t.spoor)} · ${route}${t.vervalt?" · vervalt":""}</div></span></div>`;
 }
 async function haal(pad,q){
   const r=await fetch(S.base.replace(/\/$/,"")+pad+"?"+new URLSearchParams(q));
@@ -86,7 +96,13 @@ async function ververs(){
   $("mh").textContent="Metro "+S.mnaam;
   const naar=S.best.split(",").map(s=>s.trim()).filter(Boolean).join(" / ");
   const taken=[];
-  if(S.station){
+  if(S.station&&S.overstap&&S.best){
+    $("th").textContent=`Reizen van ${S.station} naar ${naar} (incl. overstap)`;
+    taken.push(haal("/reis",{station:S.station,bestemming:S.best}).then(d=>{
+      $("th").textContent=`Reizen van ${d.station} naar ${naar} (incl. overstap)`;
+      $("treinen").innerHTML=d.reizen.length?d.reizen.map(reisRij).join(""):'<div class="leeg">Geen reizen gevonden.</div>';
+    }).catch(e=>$("treinen").innerHTML=`<div class="fout">${esc(e.message)}</div>`));
+  }else if(S.station){
     $("th").textContent=`Treinen van ${S.station} naar ${naar}`;
     taken.push(haal("/trein",{station:S.station,bestemming:S.best}).then(d=>{
       $("th").textContent=`Treinen van ${d.station} naar ${naar}`;

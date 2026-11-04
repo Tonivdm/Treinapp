@@ -13,6 +13,10 @@ box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:en
 main{max-width:520px;margin:0 auto;padding:16px}
 h1{font-size:20px;margin:4px 0 12px}h2{font-size:15px;margin:20px 0 8px;color:var(--mu);font-weight:600}
 .card{background:var(--card);border-radius:12px;padding:4px 14px}
+.menu{background:var(--card);border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:end}
+.menu label{grid-column:1/-1;font-size:13px;color:var(--mu);margin-top:6px}.menu label:first-child{margin-top:0}
+.menu input{grid-column:1}.menu #swap{grid-column:2;grid-row:3;margin:0;padding:10px 12px;background:var(--ln);color:var(--tx)}
+.menu #zoek{grid-column:1/-1}
 .rij{display:flex;gap:10px;align-items:baseline;padding:10px 0;border-bottom:1px solid var(--ln)}
 .rij:last-child{border:0}.t{font-weight:700;font-size:18px;min-width:52px;font-variant-numeric:tabular-nums}
 .v{color:var(--bad);font-size:13px}.r{flex:1}.m{color:var(--mu);font-size:13px}.x{text-decoration:line-through}
@@ -26,13 +30,20 @@ button{margin-top:12px;padding:10px 16px;border:0;border-radius:8px;background:v
 <body>
 <main>
 <h1>Volgende trein &amp; metro</h1>
+<div class="menu">
+  <label for="station">Van (startstation)</label>
+  <input id="station" list="dl1" autocomplete="off" placeholder="bijv. Delft">
+  <label for="best">Naar (eindstation, meerdere mogelijk met komma)</label>
+  <input id="best" list="dl2" autocomplete="off" placeholder="bijv. Rotterdam Centraal">
+  <button id="swap" title="Omdraaien" aria-label="Van en naar omdraaien">⇅</button>
+  <button id="zoek">Toon treinen</button>
+</div>
+<datalist id="dl1"></datalist><datalist id="dl2"></datalist>
 <h2 id="th">Treinen</h2><div class="card" id="treinen"></div>
 <h2 id="mh">Metro</h2><div class="card" id="metros"></div>
 <p class="m" id="upd"></p>
 <details id="inst"><summary>Instellingen</summary>
-<label>Worker-URL (zie README)</label><input id="base" placeholder="https://jouw-worker.jouwnaam.workers.dev">
-<label>Station (naam of code)</label><input id="station" placeholder="Delft">
-<label>Bestemmingen (komma-gescheiden)</label><input id="best">
+<label>Worker-URL</label><input id="base" placeholder="https://jouw-worker.jouwnaam.workers.dev">
 <label>Metronaam</label><input id="mnaam">
 <label>Metro-codes (TPC, komma-gescheiden, via ovzoeker.nl)</label><input id="mcodes" placeholder="31001234,31001235">
 <button id="opsl">Opslaan</button></details>
@@ -44,26 +55,44 @@ try{S={...D,...JSON.parse(localStorage.getItem("treinapp")||"{}")}}catch(e){}
 const $=id=>document.getElementById(id);
 const ids=["base","station","best","mnaam","mcodes"];
 ids.forEach(i=>$(i).value=S[i]);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function opslaan(){ids.forEach(i=>S[i]=$(i).value.trim());try{localStorage.setItem("treinapp",JSON.stringify(S))}catch(e){}}
 function rij(t,detail,sub){
   const v=t.vertraging>0?`<span class="v">+${t.vertraging}</span>`:"";
   return `<div class="rij"><span class="t ${t.vervalt?"x":""}">${t.tijd}</span>${v}<span class="r">${detail}<div class="m">${sub}${t.vervalt?" · vervalt":""}</div></span></div>`;
 }
-const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 async function haal(pad,q){
   const r=await fetch(S.base.replace(/\/$/,"")+pad+"?"+new URLSearchParams(q));
   const d=await r.json();if(d.fout)throw new Error(d.fout);return d;
 }
+function suggest(inp,dl,multi){
+  let tm;
+  inp.addEventListener("input",()=>{
+    clearTimeout(tm);
+    tm=setTimeout(async()=>{
+      if(!S.base)return;
+      const parts=multi?inp.value.split(","):[inp.value];
+      const last=parts.pop().trim();
+      if(last.length<2)return;
+      const prefix=parts.map(s=>s.trim()).filter(Boolean).join(",")+(parts.length?",":"");
+      try{const d=await haal("/stations",{q:last});
+        dl.innerHTML=d.stations.map(n=>`<option value="${esc(prefix+n)}">`).join("")}catch(e){}
+    },250);
+  });
+}
+suggest($("station"),$("dl1"),false);suggest($("best"),$("dl2"),true);
 async function ververs(){
   if(!S.base){$("inst").open=true;$("treinen").innerHTML='<div class="leeg">Vul eerst de Worker-URL in bij Instellingen.</div>';$("metros").innerHTML="";return}
   $("mh").textContent="Metro "+S.mnaam;
+  const naar=S.best.split(",").map(s=>s.trim()).filter(Boolean).join(" / ");
   const taken=[];
   if(S.station){
-    $("th").textContent="Treinen vanaf "+S.station+" richting "+S.best.split(",").join(" / ");
+    $("th").textContent=`Treinen van ${S.station} naar ${naar}`;
     taken.push(haal("/trein",{station:S.station,bestemming:S.best}).then(d=>{
-      $("th").textContent="Treinen vanaf "+d.station+" richting "+S.best.split(",").join(" / ");
+      $("th").textContent=`Treinen van ${d.station} naar ${naar}`;
       $("treinen").innerHTML=d.vertrekken.length?d.vertrekken.map(t=>rij(t,"naar "+esc(t.richting),`spoor ${esc(t.spoor)} · ${esc(t.soort)}`)).join(""):'<div class="leeg">Geen treinen gevonden.</div>';
     }).catch(e=>$("treinen").innerHTML=`<div class="fout">${esc(e.message)}</div>`));
-  }else $("treinen").innerHTML='<div class="leeg">Geen station ingesteld.</div>';
+  }else{$("th").textContent="Treinen";$("treinen").innerHTML='<div class="leeg">Kies hierboven een startstation.</div>'}
   if(S.mcodes){
     taken.push(haal("/metro",{codes:S.mcodes}).then(d=>{
       $("metros").innerHTML=d.vertrekken.length?d.vertrekken.map(t=>rij(t,`lijn ${esc(t.lijn)} naar ${esc(t.richting)}`,t.perron?"perron "+esc(t.perron):"")).join(""):'<div class="leeg">Geen metro’s gevonden.</div>';
@@ -72,9 +101,14 @@ async function ververs(){
   await Promise.all(taken);
   $("upd").textContent="Bijgewerkt om "+new Date().toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
 }
-$("opsl").onclick=()=>{ids.forEach(i=>S[i]=$(i).value.trim());
-  try{localStorage.setItem("treinapp",JSON.stringify(S))}catch(e){}
-  $("inst").open=false;ververs()};
+function zoek(){opslaan();ververs()}
+$("zoek").onclick=zoek;
+["station","best"].forEach(i=>$(i).addEventListener("keydown",e=>{if(e.key==="Enter")zoek()}));
+$("swap").onclick=()=>{
+  const van=$("station").value,naar=$("best").value.split(",")[0].trim();
+  $("station").value=naar;$("best").value=van;zoek();
+};
+$("opsl").onclick=()=>{opslaan();$("inst").open=false;ververs()};
 ververs();setInterval(ververs,30000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)ververs()});
 </script>
